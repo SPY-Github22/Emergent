@@ -1,9 +1,9 @@
-import { World } from './world.js';
-import { NN } from './nn.js';
-import { Trainer } from './trainer.js';
-import { Renderer } from './renderer.js';
-import { Interaction } from './interaction.js';
-import { events } from './events.js';
+
+
+
+
+
+
 
 let world;
 let nn;

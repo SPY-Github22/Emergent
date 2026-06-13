@@ -1,6 +1,6 @@
-import { events } from './events.js';
 
-export class NN {
+
+class NN {
     constructor() {
         this.model = null;
         this.actions = ['Feed', 'Connect', 'Guide', 'Approve', 'Correct'];

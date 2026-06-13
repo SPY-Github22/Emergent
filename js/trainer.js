@@ -1,6 +1,6 @@
-import { events } from './events.js';
 
-export class Trainer {
+
+class Trainer {
     constructor(world, nn) {
         this.world = world;
         this.nn = nn;

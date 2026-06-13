@@ -84,8 +84,15 @@
   </div>
 </div>
 
-<!-- JS modules (Entry point) -->
-<script type="module" src="js/main.js"></script>
+<!-- JS files (loaded sequentially, no ES6 modules to support local file:// access) -->
+<script src="js/events.js"></script>
+<script src="js/person.js"></script>
+<script src="js/world.js"></script>
+<script src="js/nn.js"></script>
+<script src="js/trainer.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/interaction.js"></script>
+<script src="js/main.js"></script>
 
 </body>
 </html>

@@ -1,4 +1,4 @@
-export class Person {
+class Person {
     constructor(id, x, y) {
         this.id = id;
         this.position = { x, y };

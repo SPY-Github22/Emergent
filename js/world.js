@@ -1,7 +1,7 @@
-import { Person } from './person.js';
-import { events } from './events.js';
 
-export class World {
+
+
+class World {
     constructor() {
         this.persons = [];
         this.time = 0;

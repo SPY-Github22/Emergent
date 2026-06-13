@@ -1,6 +1,6 @@
-import { events } from './events.js';
 
-export class Renderer {
+
+class Renderer {
     constructor(bgId, entityId, uiId) {
         this.bgCanvas = document.getElementById(bgId);
         this.entityCanvas = document.getElementById(entityId);
@@ -34,7 +34,7 @@ export class Renderer {
 
         // --- LAYER 1: Background (Only redraw if day/night changed) ---
         if (this.lastIsDay !== world.isDay) {
-            this.bgCtx.fillStyle = world.isDay ? '#1a1d2e' : '#070913';
+            this.bgCtx.fillStyle = world.isDay ? '#18181b' : '#09090b';
             this.bgCtx.fillRect(0, 0, this.width, this.height);
             
             if (!world.isDay) {

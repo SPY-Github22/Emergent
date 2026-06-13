@@ -32,4 +32,4 @@ class EventEmitter {
     }
 }
 
-export const events = new EventEmitter();
+const events = new EventEmitter();

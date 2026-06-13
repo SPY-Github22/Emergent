@@ -1,6 +1,6 @@
-import { events } from './events.js';
 
-export class Interaction {
+
+class Interaction {
     constructor(canvasId, world) {
         this.canvas = document.getElementById(canvasId);
         this.world = world;
