@@ -3,32 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Emergent — Train a Real Neural Network</title>
-  <meta name="description" content="A living grid world powered by a real neural network that learns from your interactions. Built with TensorFlow.js. No login, no cost, no limit.">
+  <title>Emergent — Village AI</title>
+  <meta name="description" content="A neural network observing a simulation.">
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <!-- TensorFlow.js v4.22.0 — runs entirely in browser, zero cost -->
+  <!-- TensorFlow.js v4.22.0 -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<!-- ═══════════════════════════════════════════ -->
-<!-- Loading overlay                             -->
-<!-- ═══════════════════════════════════════════ -->
-<div id="loading-overlay">
-  <div class="loading-inner">
-    <div class="loading-logo">EMERGENT</div>
-    <div class="loading-sub">Initializing Neural Network…</div>
-    <div class="loading-bar"><div class="loading-fill"></div></div>
-    <div class="loading-detail">TensorFlow.js · Running in your browser</div>
-  </div>
-</div>
 
 <!-- ═══════════════════════════════════════════ -->
 <!-- App shell                                   -->
@@ -39,153 +27,65 @@
   <header id="app-header">
     <div class="header-left">
       <span class="brand">EMERGENT</span>
-      <span class="brand-tag">Real Neural Network · TensorFlow.js · 100% Local</span>
     </div>
     <div class="header-center">
-      <div id="training-indicator">● Idle</div>
+      <div id="whisper-bar">
+        <span class="whisper-icon">🧠</span>
+        <span id="whisper-text">Neural Network is observing...</span>
+      </div>
     </div>
     <div class="header-right">
-      <button id="btn-seed"  class="btn btn-ghost">🌱 Seed</button>
-      <button id="btn-clear" class="btn btn-ghost">🗑 Clear</button>
-      <button id="btn-pause" class="btn btn-ghost">⏸ Pause</button>
-      <button id="btn-reset" class="btn btn-danger">↺ Reset AI</button>
+      <div id="training-indicator">● Idle</div>
     </div>
   </header>
 
   <!-- ── Main layout ────────────────────────── -->
   <div id="main-layout">
 
-    <!-- Left: Tool Palette -->
-    <aside id="tool-sidebar">
-      <div class="sidebar-label">TOOLS</div>
-      <div id="tool-palette"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="sidebar-label">BRUSH</div>
-      <div class="control-row">
-        <span class="ctrl-label">Size</span>
-        <input type="range" id="brush-size" min="0" max="5" value="1" step="1">
-        <span class="ctrl-val" id="brush-val">1</span>
-      </div>
-
-      <div class="sidebar-divider"></div>
-      <div class="sidebar-label">CREATIVITY</div>
-      <div class="control-row">
-        <span class="ctrl-label">Temp</span>
-        <input type="range" id="temp-slider" min="0.5" max="2.5" value="1.3" step="0.1">
-        <span class="ctrl-val" id="temp-val">1.3</span>
-      </div>
-      <div class="temp-hint">↑ Higher = more unpredictable</div>
-
-      <div class="sidebar-divider"></div>
-      <div class="sidebar-label">SHORTCUTS</div>
-      <div class="shortcut-list">
-        <span class="sc">1–0, Q</span> tools<br>
-        <span class="sc">E</span> erase<br>
-        <span class="sc">[ ]</span> brush<br>
-        <span class="sc">Space</span> pause
-      </div>
-    </aside>
-
-    <!-- Center: Grid canvas -->
+    <!-- Center: Stacked Canvas Area -->
     <main id="canvas-area">
       <div id="canvas-frame">
-        <canvas id="grid-canvas"></canvas>
-        <div id="canvas-label">Paint to train · Right-click to erase</div>
+        <canvas id="bg-canvas" width="800" height="600"></canvas>
+        <canvas id="entity-canvas" width="800" height="600"></canvas>
+        <canvas id="ui-canvas" width="800" height="600"></canvas>
       </div>
     </main>
 
     <!-- Right: NN Dashboard -->
-    <aside id="nn-dashboard">
-
-      <!-- Live stats -->
+    <aside id="nn-dashboard" class="glass-panel">
+      
+      <!-- General Control -->
       <section class="panel">
-        <div class="panel-title">⚙ World Stats</div>
-        <div id="stats-panel"></div>
-      </section>
-
-      <!-- NN Influence meter -->
-      <section class="panel">
-        <div class="panel-title">🧠 AI Influence</div>
-        <div id="influence-meter">
-          <div class="influence-track">
-            <div class="influence-fill" style="width:0%"></div>
-          </div>
-          <div class="influence-row">
-            <span class="inf-label">Physics ←</span>
-            <span class="influence-pct">0%</span>
-            <span class="inf-label">→ Neural Net</span>
-          </div>
+        <div class="panel-title">World State</div>
+        <div class="control-row">
+            <button id="btn-pause" class="btn btn-ghost">⏸ Pause</button>
+            <button id="btn-reset" class="btn btn-danger">↺ Reset DB</button>
         </div>
-        <div class="panel-hint">Increases as you train more</div>
       </section>
 
-      <!-- Loss / Accuracy chart -->
-      <section class="panel panel-chart">
-        <div class="panel-title">📈 Training Metrics</div>
-        <canvas id="loss-canvas" width="260" height="110"></canvas>
-        <div id="mem-info" class="mem-info">—</div>
+      <!-- AI Mind Panel -->
+      <section class="panel panel-mind">
+        <div class="panel-title">🧠 AI Mind</div>
+        <div class="panel-hint">Current Action Probabilities</div>
+        <div id="mind-stats">
+          <!-- Populated by JS -->
+        </div>
       </section>
 
-      <!-- Training data bias -->
-      <section class="panel panel-bias">
-        <div class="panel-title">⚖ Training Bias</div>
-        <div class="panel-hint">What your AI has been fed</div>
-        <canvas id="bias-canvas" width="260" height="220"></canvas>
-      </section>
-
-      <!-- Weight heatmap -->
-      <section class="panel panel-weights">
-        <div class="panel-title">🔬 Conv1 Weights</div>
-        <div class="panel-hint">Internal CNN filter values</div>
-        <canvas id="weight-canvas" width="260" height="60"></canvas>
+      <!-- Event Journal -->
+      <section class="panel panel-journal">
+        <div class="panel-title">📓 Event Journal</div>
+        <div id="event-journal">
+          <div class="journal-entry">Simulation started.</div>
+        </div>
       </section>
 
     </aside>
-  </div><!-- /main-layout -->
-
-</div><!-- /app -->
-
-<!-- ═══════════════════════════════════════════ -->
-<!-- Insight toast container                     -->
-<!-- ═══════════════════════════════════════════ -->
-<div id="toast-container"></div>
-
-<!-- ═══════════════════════════════════════════ -->
-<!-- Onboarding overlay                          -->
-<!-- ═══════════════════════════════════════════ -->
-<div id="onboarding">
-  <div class="onboard-card">
-    <div class="onboard-logo">EMERGENT</div>
-    <h1 class="onboard-title">You control a real AI.</h1>
-    <p class="onboard-desc">
-      This is not a game in the traditional sense. You interact with a living grid world — painting, erasing, experimenting — while a <strong>real neural network</strong> watches every move.
-    </p>
-    <p class="onboard-desc">
-      It learns the patterns of how you engage with the world, then starts generating new behavior based on that learning. <strong>Good training produces emergence. Poor training produces chaos.</strong>
-    </p>
-    <div class="onboard-tips">
-      <div class="tip">🖌 <strong>Paint</strong> cells to feed training data</div>
-      <div class="tip">🌱 <strong>Seed</strong> the world with random life</div>
-      <div class="tip">⚡ <strong>Mix</strong> cell types for richer behavior</div>
-      <div class="tip">⏸ <strong>Pause</strong> to study patterns</div>
-    </div>
-    <button class="close-onboard btn btn-primary">Start Experimenting →</button>
-    <div class="onboard-fine">Built with TensorFlow.js · Runs entirely in your browser · No data leaves your device</div>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════ -->
-<!-- JS modules (order matters — deps first)     -->
-<!-- ═══════════════════════════════════════════ -->
-<script src="js/engine.js"></script>
-<script src="js/nn.js"></script>
-<script src="js/renderer.js"></script>
-<script src="js/interaction.js"></script>
-<script src="js/trainer.js"></script>
-<script src="js/visualizer.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/main.js"></script>
+<!-- JS modules (Entry point) -->
+<script type="module" src="js/main.js"></script>
 
 </body>
 </html>

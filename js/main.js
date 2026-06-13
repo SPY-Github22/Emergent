@@ -1,332 +1,142 @@
-/**
- * main.js — Bootstrap & Game Loop
- * - World starts empty and STATIC (no physics until player paints)
- * - Dashboard hidden initially, reveals progressively
- * - Tutorial steps drive the first-run experience
- */
+import { World } from './world.js';
+import { NN } from './nn.js';
+import { Trainer } from './trainer.js';
+import { Renderer } from './renderer.js';
+import { Interaction } from './interaction.js';
+import { events } from './events.js';
 
-'use strict';
+let world;
+let nn;
+let trainer;
+let renderer;
+let interaction;
 
-const GRID_W  = 50;
-const GRID_H  = 50;
-const CELL_PX = 12;   // → 600×600 canvas
-const TICK_MS = 600;  // Tick every 600ms — slow & legible
-const VIZ_MS  = 800;  // Dashboard refresh every 0.8s
+let isPaused = false;
+let lastTime = performance.now();
 
-let engine, nn, renderer, interaction, trainer, visualizer, ui;
-let tickTimer = null;
-let vizTimer  = null;
-let _tickRunning = false;  // Overlap guard
-
-// Tutorial state
-let tutorialStep = 0;        // 0=not started, 1–4=steps, 5=done
-let totalInteractions = 0;
-let toolsUsed         = new Set();
-let firstTrainingDone = false;
-let dashboardRevealed = false;
-
-// ─── Boot ─────────────────────────────────────────────────────────────
-async function boot() {
-  showLoading(true, 'Loading TensorFlow.js…');
-
-  // 1. Engine — completely empty, physics off
-  engine = new Engine(GRID_W, GRID_H);
-
-  // 2. Neural network
-  showLoading(true, 'Initializing neural network…');
-  nn = new NeuralNet();
-  await nn.init();
-
-  // 3. Renderer
-  const gridCanvas = document.getElementById('grid-canvas');
-  renderer = new Renderer(gridCanvas, GRID_W, GRID_H, CELL_PX);
-
-  // 4. Interaction
-  interaction = new Interaction(gridCanvas, engine, renderer);
-
-  // 5. Trainer
-  trainer = new Trainer(nn, engine);
-
-  // 6. Visualizer
-  visualizer = new Visualizer({
-    lossCanvas:  document.getElementById('loss-canvas'),
-    biasCanvas:  document.getElementById('bias-canvas'),
-    influenceEl: document.getElementById('influence-meter'),
-    memEl:       document.getElementById('mem-info'),
-    weightCanvas: document.getElementById('weight-canvas'),
-  });
-
-  // 7. UI
-  ui = new UI({
-    toolPalette:    document.getElementById('tool-palette'),
-    brushSizeEl:    document.getElementById('brush-size'),
-    brushValEl:     document.getElementById('brush-val'),
-    tempSlider:     document.getElementById('temp-slider'),
-    tempValEl:      document.getElementById('temp-val'),
-    statsEl:        document.getElementById('stats-panel'),
-    toastContainer: document.getElementById('toast-container'),
-    resetBtn:       document.getElementById('btn-reset'),
-    pauseBtn:       document.getElementById('btn-pause'),
-    clearBtn:       document.getElementById('btn-clear'),
-  });
-
-  // ── Wire events ───────────────────────────────────────────────────
-
-  ui.onToolChange  = (type) => {
-    interaction.setTool(type);
-    toolsUsed.add(type);
-  };
-  ui.onBrushChange = (r) => interaction.setBrushRadius(r);
-  ui.onTempChange  = (t) => { nn.temperature = t; };
-
-  ui.onPause = (paused) => {
-    engine.paused = paused;
-    if (paused) stopTick(); else startTick();
-  };
-
-  ui.onClear = () => {
-    engine.clear();
-    trainer.clearBuffer();
-    renderer.fullRedraw(engine);
-    totalInteractions = 0;
-    toolsUsed = new Set([interaction.currentTool]);
-    firstTrainingDone = false;
-  };
-
-  ui.onReset = async () => {
-    stopTick();
-    trainer.stopAutoTrain();
-    trainer.clearBuffer();
-    await nn.reset();
-    engine.clear();
-    engine.setNNInfluence(0);
-    renderer.fullRedraw(engine);
-    visualizer.lossChart.clear();
-    visualizer.lossChart.draw();
-    totalInteractions = 0;
-    toolsUsed = new Set([interaction.currentTool]);
-    firstTrainingDone = false;
-    dashboardRevealed = false;
-    hideDashboard();
-    trainer._startAutoTrain();
-    startTick();
-  };
-
-  // Player paints → training samples + tutorial advancement
-  interaction.onSamples = (samples) => {
-    trainer.addSamples(samples);
-    totalInteractions += samples.length;
-    toolsUsed.add(interaction.currentTool);
-
-    // Activate physics on very first paint
-    if (!engine.physicsActive) {
-      engine.physicsActive = true;
-    }
-
-    checkTutorialProgress();
-  };
-
-  // NN callbacks
-  nn.onEpochEnd     = (epoch, logs) => visualizer.onEpochEnd(epoch, logs);
-  nn.onTrainingStart = ()  => ui.setTrainingStatus(true);
-  nn.onTrainingEnd   = () => {
-    ui.setTrainingStatus(false);
-    renderer.flashTrainingPulse();
-    if (!firstTrainingDone) {
-      firstTrainingDone = true;
-      checkTutorialProgress();
-    }
-  };
-  nn.onInsight      = (insight) => ui.queueInsight(insight);
-  trainer.onDiversityInsight = (insight) => ui.queueInsight(insight);
-
-  // ── Start loops ───────────────────────────────────────────────────
-  startTick();
-  vizTimer = setInterval(vizTick, VIZ_MS);
-  requestAnimationFrame(renderLoop);
-
-  // Initial render (empty grid)
-  renderer.fullRedraw(engine);
-
-  showLoading(false);
-
-  // Hide dashboard until earned
-  hideDashboard();
-
-  // Start tutorial
-  setTimeout(() => startTutorial(), 600);
+async function init() {
+    console.log("Emergent: Initializing...");
+    
+    // Core Logic
+    world = new World();
+    await world.initDB();
+    await world.loadState();
+    
+    // AI & Training
+    nn = new NN();
+    trainer = new Trainer(world, nn);
+    
+    // Rendering & Interaction
+    renderer = new Renderer('bg-canvas', 'entity-canvas', 'ui-canvas');
+    interaction = new Interaction('ui-canvas', world);
+    
+    // UI Event Listeners
+    setupUI();
+    
+    // Game Loop
+    requestAnimationFrame(gameLoop);
 }
 
-// ─── Simulation tick ──────────────────────────────────────────────────
-function startTick() {
-  if (tickTimer) clearInterval(tickTimer);
-  tickTimer = setInterval(simulationTick, TICK_MS);
-}
-function stopTick() {
-  if (tickTimer) clearInterval(tickTimer);
-  tickTimer = null;
-}
+function setupUI() {
+    const pauseBtn = document.getElementById('btn-pause');
+    const resetBtn = document.getElementById('btn-reset');
+    const whisperText = document.getElementById('whisper-text');
+    const eventJournal = document.getElementById('event-journal');
+    const mindStats = document.getElementById('mind-stats');
 
-async function simulationTick() {
-  if (_tickRunning) return; // Don't stack ticks
-  _tickRunning = true;
-  try {
-    const predictFn = (nn.isReady && !nn.isTraining && nn.nnInfluence > 0.05)
-      ? (hoods) => nn.predictBatch(hoods)
-      : null;
-    await engine.tick(predictFn);
-  } finally {
-    _tickRunning = false;
-  }
-}
-
-// ─── Render loop (RAF) ────────────────────────────────────────────────
-function renderLoop() {
-  renderer.render(engine);
-  requestAnimationFrame(renderLoop);
-}
-
-// ─── Dashboard refresh ────────────────────────────────────────────────
-function vizTick() {
-  if (!dashboardRevealed) return;
-  visualizer.tick(nn, trainer);
-  ui.updateStats(engine.getStats(), nn.getStats(), trainer.getStats());
-}
-
-// ─── Progressive dashboard reveal ────────────────────────────────────
-function hideDashboard() {
-  const dash = document.getElementById('nn-dashboard');
-  if (dash) dash.classList.add('hidden-dashboard');
-}
-
-function revealDashboard() {
-  if (dashboardRevealed) return;
-  dashboardRevealed = true;
-  const dash = document.getElementById('nn-dashboard');
-  if (dash) {
-    dash.classList.remove('hidden-dashboard');
-    dash.classList.add('dashboard-reveal');
-  }
-}
-
-// ─── Tutorial progression ─────────────────────────────────────────────
-function startTutorial() {
-  tutorialStep = 1;
-  showTutorialStep(1);
-}
-
-function checkTutorialProgress() {
-  if (tutorialStep === 1 && totalInteractions >= 1) {
-    // Player made first click → advance to step 2
-    setTimeout(() => advanceTutorial(2), 400);
-  } else if (tutorialStep === 2 && totalInteractions >= 30) {
-    // Player painted enough → advance to step 3
-    setTimeout(() => advanceTutorial(3), 600);
-  } else if (tutorialStep === 3 && toolsUsed.size >= 2) {
-    // Player used a second tool → advance to step 4
-    setTimeout(() => advanceTutorial(4), 600);
-  } else if (tutorialStep === 4 && firstTrainingDone) {
-    // First training complete → reveal dashboard, finish tutorial
-    setTimeout(() => {
-      revealDashboard();
-      advanceTutorial(5);
-    }, 1000);
-  }
-}
-
-function advanceTutorial(step) {
-  tutorialStep = step;
-  showTutorialStep(step);
-}
-
-function showTutorialStep(step) {
-  // Dismiss existing step card
-  document.querySelectorAll('.tutorial-card').forEach(el => el.remove());
-
-  if (step === 5) {
-    // Tutorial complete — show a brief success toast
-    ui.queueInsight({
-      type: 'tutorial_complete', title: 'You\'re on your own now.',
-      message: 'Explore freely. Try different patterns. Watch what your AI learns. There are no rules — only consequences.',
-      emoji: '🚀', severity: 'success', level: 1,
+    pauseBtn.addEventListener('click', () => {
+        isPaused = !isPaused;
+        pauseBtn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
     });
-    return;
-  }
 
-  const steps = {
-    1: {
-      emoji: '🌍',
-      title: 'Your world is empty.',
-      body:  'Nothing moves. Nothing lives. <strong>Click or drag anywhere on the dark grid</strong> to paint your first living cells.',
-      progress: 1,
-      position: 'center',
-    },
-    2: {
-      emoji: '🖌️',
-      title: 'Keep painting.',
-      body:  'Fill in a pattern — a cluster, a line, a shape. The more cells you paint, the more your AI has to learn from.',
-      progress: 2,
-      position: 'canvas-right',
-    },
-    3: {
-      emoji: '🔬',
-      title: 'Try a different material.',
-      body:  'Select <strong>Food ✦</strong> or <strong>Energy ⚡</strong> from the toolbar and paint near your Alive cells. Different materials create different dynamics.',
-      progress: 3,
-      position: 'sidebar-right',
-    },
-    4: {
-      emoji: '⏳',
-      title: 'Your AI is learning…',
-      body:  'It trains automatically every few seconds. When it finishes its first round, your dashboard will unlock. Keep painting.',
-      progress: 4,
-      position: 'canvas-right',
-    },
-  };
+    resetBtn.addEventListener('click', async () => {
+        if(confirm("Wipe all training and world data?")) {
+            indexedDB.deleteDatabase('EmergentWorldDB');
+            indexedDB.deleteDatabase('EmergentTrainerDB');
+            indexedDB.deleteDatabase('emergent-nn-model'); // tfjs format might use a different db name, but we reset world anyway
+            location.reload();
+        }
+    });
 
-  const s = steps[step];
-  if (!s) return;
+    function logEvent(msg, color = '#e2e8f0') {
+        const entry = document.createElement('div');
+        entry.className = 'journal-entry';
+        entry.style.color = color;
+        entry.textContent = msg;
+        eventJournal.prepend(entry);
+        if (eventJournal.children.length > 20) {
+            eventJournal.removeChild(eventJournal.lastChild);
+        }
+    }
 
-  const card = document.createElement('div');
-  card.className = `tutorial-card tutorial-pos-${s.position}`;
-  card.innerHTML = `
-    <div class="tc-emoji">${s.emoji}</div>
-    <div class="tc-title">${s.title}</div>
-    <p class="tc-body">${s.body}</p>
-    <div class="tc-footer">
-      <div class="tc-dots">
-        ${[1,2,3,4].map(i => `<span class="tc-dot ${i === s.progress ? 'active' : (i < s.progress ? 'done' : '')}"></span>`).join('')}
-      </div>
-      <button class="tc-skip" onclick="skipTutorial()">Skip guide</button>
-    </div>
-  `;
-  document.body.appendChild(card);
-  requestAnimationFrame(() => card.classList.add('visible'));
+    events.on('ACTION_TAKEN', (data) => {
+        whisperText.textContent = `You guided ${data.target} to ${data.action}. The NN is watching.`;
+        logEvent(`Player forced ${data.target} to ${data.action}.`, '#38bdf8'); // Cyan
+    });
+
+    events.on('NN_DECISION', (data) => {
+        whisperText.textContent = `NN predicted ${data.action} for ${data.targetId}`;
+        logEvent(`AI autonomously decided ${data.targetId} should ${data.action}.`, '#a78bfa'); // Violet
+    });
+
+    events.on('DAY_NIGHT_CHANGED', (data) => {
+        logEvent(`The sun has ${data.isDay ? 'risen' : 'set'}.`, '#f59e0b');
+    });
+
+    events.on('AGENT_ARRIVED', (data) => {
+        logEvent(`${data.person.id} has arrived in the world.`, '#10b981');
+    });
+
+    // Mind Panel updates
+    setInterval(() => {
+        if (!world || world.persons.length === 0) return;
+        // Show prediction for the first agent as an example
+        const p1 = world.persons[0];
+        const state = p1.getState();
+        // A direct predict call without threshold trigger just to show stats
+        const pred = nn.predict(state); 
+        if (pred && pred.action) {
+            mindStats.innerHTML = `
+                <div class="mind-row"><span>Target:</span> <span>${p1.id}</span></div>
+                <div class="mind-row"><span>Intent:</span> <strong>${pred.action}</strong></div>
+                <div class="mind-row"><span>Confidence:</span> <span>${(pred.confidence * 100).toFixed(1)}%</span></div>
+            `;
+        }
+    }, 1000);
+    
+    // World Save loop
+    setInterval(() => {
+        world.saveState();
+    }, 5000);
 }
 
-window.skipTutorial = function () {
-  document.querySelectorAll('.tutorial-card').forEach(el => el.remove());
-  tutorialStep = 5;
-  revealDashboard();
-};
+function gameLoop(currentTime) {
+    const dt = currentTime - lastTime;
+    lastTime = currentTime;
 
-// ─── Loading ──────────────────────────────────────────────────────────
-function showLoading(show, msg = '') {
-  const el = document.getElementById('loading-overlay');
-  if (!el) return;
-  if (show) {
-    el.classList.remove('hidden');
-    const sub = el.querySelector('.loading-sub');
-    if (sub && msg) sub.textContent = msg;
-  } else {
-    el.classList.add('hidden');
-  }
+    if (!isPaused) {
+        // Physics update
+        world.update(dt);
+        
+        // AI Predict step (Every few frames, or managed internally. 
+        // For now, let's let the world/person logic call events, but actually person.js needs to ask for predictions.)
+        // In the current person.js provided by the teamwork, it might not automatically ask. 
+        // We'll hook the NN to the agents.
+        for (const person of world.persons) {
+            // Check if they need a decision (e.g., every 2 seconds)
+            if (Math.random() < 0.01) { // roughly every 1.6 seconds at 60fps
+                nn.predict(person.getState());
+            }
+        }
+    }
+
+    // Render step
+    renderer.render(world, interaction.state);
+
+    requestAnimationFrame(gameLoop);
 }
 
-// ─── Start ────────────────────────────────────────────────────────────
+// Start
 document.addEventListener('DOMContentLoaded', () => {
-  boot().catch(err => {
-    console.error('[EMERGENT] Boot failed:', err);
-    showLoading(true, 'Error: ' + err.message);
-  });
+    init();
 });
