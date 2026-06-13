@@ -1,35 +1,15 @@
-/**
- * events.js
- * Global event bus for the Emergent simulation.
- */
+/* events.js — Global event bus */
+'use strict';
 
-class EventEmitter {
-    constructor() {
-        this.listeners = {};
+const events = (() => {
+  const _listeners = {};
+  return {
+    on(evt, fn)   { (_listeners[evt] = _listeners[evt] || []).push(fn); },
+    off(evt, fn)  { if (_listeners[evt]) _listeners[evt] = _listeners[evt].filter(f => f !== fn); },
+    emit(evt, d)  { (_listeners[evt] || []).forEach(fn => fn(d)); },
+    once(evt, fn) {
+      const wrap = (d) => { fn(d); this.off(evt, wrap); };
+      this.on(evt, wrap);
     }
-
-    /**
-     * Subscribe to an event.
-     * @param {string} event 
-     * @param {Function} callback 
-     */
-    on(event, callback) {
-        if (!this.listeners[event]) {
-            this.listeners[event] = [];
-        }
-        this.listeners[event].push(callback);
-    }
-
-    /**
-     * Emit an event with data.
-     * @param {string} event 
-     * @param {any} data 
-     */
-    emit(event, data) {
-        if (this.listeners[event]) {
-            this.listeners[event].forEach(callback => callback(data));
-        }
-    }
-}
-
-const events = new EventEmitter();
+  };
+})();

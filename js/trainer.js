@@ -1,150 +1,126 @@
-
+/* trainer.js — Class-balanced experience replay buffer + training scheduler */
+'use strict';
 
 class Trainer {
-    constructor(world, nn) {
-        this.world = world;
-        this.nn = nn;
-        this.maxSize = 500;
-        this.batchSize = 32;
-        this.samples = []; 
-        
-        this.dbName = 'EmergentTrainerDB';
-        this.dbVersion = 1;
-        this.storeName = 'training_samples';
-        this.db = null;
+  constructor(nn) {
+    this.nn       = nn;
+    this.buffer   = [];
+    this.maxBuf   = 1200;
+    this.counts   = new Array(C.NN_ACTIONS).fill(0); // per-action sample counts
+    this.db       = null;
+    this.dbName   = 'EmergentTrainer_v4';
 
-        this.initDB().then(() => {
-            return this.loadSamples();
-        });
+    events.on('ACTION_TAKEN', this._onAction.bind(this));
+  }
 
-        this.nn.load();
+  async init() {
+    await this._openDB();
+    await this._loadBuffer();
+    this.nn.totalSamples = this.buffer.length;
+  }
 
-        events.on('ACTION_TAKEN', this.handleActionTaken.bind(this));
+  // ── IndexedDB ────────────────────────────────
+  async _openDB() {
+    return new Promise(resolve => {
+      try {
+        const req = indexedDB.open(this.dbName, 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore('s', { autoIncrement: true });
+        req.onsuccess = e => { this.db = e.target.result; resolve(); };
+        req.onerror   = () => resolve();
+      } catch { resolve(); }
+    });
+  }
 
-        setInterval(() => this.trainTask(), 5000);
-    }
-
-    async initDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            request.onupgradeneeded = (e) => {
-                const db = e.target.result;
-                if (!db.objectStoreNames.contains(this.storeName)) {
-                    db.createObjectStore(this.storeName, { keyPath: 'dbId', autoIncrement: true });
-                }
-            };
-            request.onsuccess = (e) => {
-                this.db = e.target.result;
-                resolve();
-            };
-            request.onerror = (e) => reject(e);
-        });
-    }
-
-    async loadSamples() {
-        if (!this.db) return;
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.storeName], 'readwrite');
-            const store = transaction.objectStore(this.storeName);
-            const request = store.getAll();
-            
-            request.onsuccess = (e) => {
-                let results = e.target.result || [];
-                if (results.length > this.maxSize) {
-                    const toDelete = results.length - this.maxSize;
-                    const itemsToDelete = results.slice(0, toDelete);
-                    results = results.slice(toDelete);
-                    
-                    itemsToDelete.forEach(item => store.delete(item.dbId));
-                }
-                this.samples = [...results, ...this.samples].slice(-this.maxSize);
-                resolve();
-            };
-            request.onerror = (e) => reject(e);
-        });
-    }
-
-    async handleActionTaken(data) {
-        const { action, stateSnapshot } = data;
-        
-        const sample = {
-            action: action,
-            state: {
-                ...stateSnapshot,
-                isDay: this.world.isDay
-            },
-            timestamp: Date.now()
+  async _loadBuffer() {
+    if (!this.db) return;
+    return new Promise(resolve => {
+      try {
+        const tx = this.db.transaction('s', 'readonly');
+        tx.objectStore('s').getAll().onsuccess = e => {
+          const all = e.target.result || [];
+          this.buffer = all.slice(-this.maxBuf);
+          for (const s of this.buffer) {
+            if (s.i >= 0 && s.i < C.NN_ACTIONS) this.counts[s.i]++;
+          }
+          resolve();
         };
+      } catch { resolve(); }
+    });
+  }
 
-        if (this.db) {
-            const transaction = this.db.transaction([this.storeName], 'readwrite');
-            const store = transaction.objectStore(this.storeName);
-            const request = store.add(sample);
-            
-            request.onsuccess = (e) => {
-                sample.dbId = e.target.result;
-                this.samples.push(sample);
-                
-                if (this.samples.length > this.maxSize) {
-                    const oldest = this.samples.shift();
-                    if (oldest.dbId !== undefined) {
-                        const delTransaction = this.db.transaction([this.storeName], 'readwrite');
-                        delTransaction.objectStore(this.storeName).delete(oldest.dbId);
-                    }
-                }
-            };
-            
-            request.onerror = (e) => {
-                console.error("Trainer: Failed to add sample to DB", e);
-            };
-        } else {
-            this.samples.push(sample);
-            if (this.samples.length > this.maxSize) {
-                this.samples.shift();
-            }
-        }
+  _persist(sample) {
+    if (!this.db) return;
+    try {
+      this.db.transaction('s', 'readwrite').objectStore('s').add(sample);
+    } catch {}
+  }
+
+  // ── Receive player action ────────────────────
+  _onAction(data) {
+    const { features, actionIdx } = data;
+    if (!features || actionIdx === undefined || actionIdx < 0) return;
+
+    const s = { f: features, i: actionIdx };
+    this.buffer.push(s);
+    this.counts[actionIdx]++;
+    this.nn.totalSamples++;
+
+    if (this.buffer.length > this.maxBuf) {
+      const old = this.buffer.shift();
+      if (old.i >= 0 && old.i < C.NN_ACTIONS) this.counts[old.i] = Math.max(0, this.counts[old.i] - 1);
+    }
+    this._persist(s);
+  }
+
+  // ── Build a class-balanced training batch ────
+  _balancedBatch(size) {
+    if (this.buffer.length === 0) return { xArr: [], yArr: [] };
+
+    // Group by action
+    const byAction = Array.from({ length: C.NN_ACTIONS }, () => []);
+    for (const s of this.buffer) {
+      if (s.i >= 0 && s.i < C.NN_ACTIONS) byAction[s.i].push(s);
+    }
+    const populated = byAction.filter(g => g.length > 0);
+    if (!populated.length) return { xArr: [], yArr: [] };
+
+    const perClass = Math.ceil(size / populated.length);
+    const batch = [];
+    for (const grp of populated) {
+      const n = Math.min(perClass, grp.length);
+      // Reservoir-sample n items
+      const shuffled = [...grp].sort(() => Math.random() - 0.5);
+      batch.push(...shuffled.slice(0, n));
     }
 
-    async trainTask() {
-        if (this.samples.length < 10) return;
-        if (this.nn.isTraining) return;
-
-        const batchSize = Math.min(this.batchSize, this.samples.length);
-        const batch = [];
-        const indices = new Set();
-        
-        while (batch.length < batchSize) {
-            const idx = Math.floor(Math.random() * this.samples.length);
-            if (!indices.has(idx)) {
-                indices.add(idx);
-                batch.push(this.samples[idx]);
-            }
-        }
-
-        const xTrain = [];
-        const yTrain = [];
-
-        for (const sample of batch) {
-            const actionIdx = this.nn.actions.indexOf(sample.action);
-            if (actionIdx === -1) continue;
-
-            const s = sample.state;
-            
-            xTrain.push([
-                (s.position && s.position.x ? s.position.x : 0) / 800,
-                (s.position && s.position.y ? s.position.y : 0) / 600,
-                (s.direction && s.direction.x !== undefined ? s.direction.x : 0),
-                (s.direction && s.direction.y !== undefined ? s.direction.y : 0),
-                (s.hunger !== undefined ? s.hunger : 0) / 100,
-                (s.social !== undefined ? s.social : 0) / 100,
-                s.isDay ? 1 : 0
-            ]);
-
-            const y = [0, 0, 0, 0, 0];
-            y[actionIdx] = 1;
-            yTrain.push(y);
-        }
-
-        await this.nn.train(xTrain, yTrain);
+    const xArr = [], yArr = [];
+    for (const s of batch.sort(() => Math.random() - 0.5)) {
+      xArr.push(s.f);
+      const y = new Array(C.NN_ACTIONS).fill(0);
+      y[s.i] = 1;
+      yArr.push(y);
     }
+    return { xArr, yArr };
+  }
+
+  // ── Training call ────────────────────────────
+  async trainIfReady() {
+    if (this.buffer.length < C.NN_MIN_SAMPLES) return;
+    if (this.nn.isTraining) return;
+
+    const { xArr, yArr } = this._balancedBatch(80);
+    if (xArr.length < 8) return;
+    await this.nn.train(xArr, yArr);
+  }
+
+  // ── Stats for UI ─────────────────────────────
+  getBiasInfo() {
+    const total = this.counts.reduce((a, b) => a + b, 0);
+    if (!total) return null;
+    return C.ACTIONS.map((name, i) => ({
+      name,
+      count: this.counts[i] || 0,
+      pct: (((this.counts[i] || 0) / total) * 100).toFixed(0),
+    }));
+  }
 }
