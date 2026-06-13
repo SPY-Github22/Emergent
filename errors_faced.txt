@@ -1,0 +1,3 @@
+# errors_faced.txt — Emergent Error Log
+# Format: [TIMESTAMP] ERROR | CONTEXT | SOLUTION (once resolved)
+# ────────────────────────────────────────────────────────────────
