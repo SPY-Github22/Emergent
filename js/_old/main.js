@@ -121,8 +121,8 @@ function _refreshHUD() {
   }
 
   // Mind panel — update once per second-ish via throttle
-  if (!this._lastMind || totalMs - this._lastMind > 1000) {
-    this._lastMind = totalMs;
+  if (!_refreshHUD._lastMind || totalMs - _refreshHUD._lastMind > 1000) {
+    _refreshHUD._lastMind = totalMs;
     _updateMindPanel();
   }
 }
