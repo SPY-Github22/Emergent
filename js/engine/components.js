@@ -58,6 +58,65 @@ class TerrainTile {
     }
 }
 
+// Neural Brain for Phase 11
+class NeuralBrain {
+    constructor(parentModelA = null, parentModelB = null) {
+        // Option B: Muscle Brain
+        // Inputs (6): dx Food, dy Food, dx Mate, dy Mate, Energy, Age
+        // Outputs (2): vx, vy (-1 to 1)
+        
+        if (parentModelA && parentModelB) {
+            // Neuroevolution: Inherit and mutate
+            this.model = this.crossoverAndMutate(parentModelA, parentModelB);
+        } else {
+            // Random initialization
+            this.model = tf.sequential();
+            this.model.add(tf.layers.dense({ units: 8, inputShape: [6], activation: 'relu' }));
+            this.model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+            this.model.add(tf.layers.dense({ units: 2, activation: 'tanh' })); // Outputs between -1 and 1
+        }
+    }
+    
+    crossoverAndMutate(parentA, parentB) {
+        return tf.tidy(() => {
+            const childModel = tf.sequential();
+            childModel.add(tf.layers.dense({ units: 8, inputShape: [6], activation: 'relu' }));
+            childModel.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+            childModel.add(tf.layers.dense({ units: 2, activation: 'tanh' }));
+            
+            const weightsA = parentA.getWeights();
+            const weightsB = parentB.getWeights();
+            const childWeights = [];
+            
+            for (let i = 0; i < weightsA.length; i++) {
+                const shape = weightsA[i].shape;
+                const flatA = weightsA[i].dataSync();
+                const flatB = weightsB[i].dataSync();
+                const childData = new Float32Array(flatA.length);
+                
+                for (let j = 0; j < flatA.length; j++) {
+                    // 50% chance to take from Parent A or B
+                    childData[j] = Math.random() > 0.5 ? flatA[j] : flatB[j];
+                    
+                    // 5% chance of mutation (Gaussian noise)
+                    if (Math.random() < 0.05) {
+                        // Box-Muller transform for normal distribution
+                        let u = 0, v = 0;
+                        while(u === 0) u = Math.random();
+                        while(v === 0) v = Math.random();
+                        let num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+                        childData[j] += num * 0.5; // Mutation severity
+                    }
+                }
+                childWeights.push(tf.tensor(childData, shape));
+            }
+            
+            childModel.setWeights(childWeights);
+            return childModel;
+        });
+    }
+}
+
 class Path {
     constructor() {
         this.waypoints = [];

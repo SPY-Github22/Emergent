@@ -197,16 +197,7 @@ class ForagingSystem extends System {
                             stats.actionTarget = null;
                         }
                     } else {
-                        // Navigate to food (only recalculate if we don't already have a path or arrived)
-                        if (path.waypoints.length === 0 || path.currentWaypointIndex >= path.waypoints.length) {
-                            if (astar) {
-                                const newPath = astar.findPath(pos.x, pos.y, foodPos.x, foodPos.y);
-                                if (newPath) {
-                                    path.waypoints = newPath;
-                                    path.currentWaypointIndex = 0;
-                                }
-                            }
-                        }
+                        // Option B: No pathfinding! Brain handles movement.
                     }
                 }
             }
@@ -214,18 +205,115 @@ class ForagingSystem extends System {
     }
 }
 
-// Movement & Pathfinding System (Phase 7)
+// Brain System (Phase 11: Option B)
+class BrainSystem extends System {
+    update(world, dt) {
+        const agents = world.query([Position, Velocity, OrganismStats, NeuralBrain], this.queryResults);
+        const allFoods = world.query([Position, Food], []);
+        
+        // Batch predictions for performance
+        // But for simplicity in JS without proper batching setup, we'll do individual predictions
+        // tf.tidy is crucial here to prevent memory leaks!
+        
+        tf.tidy(() => {
+            for (const entityId of agents) {
+                const pos = world.getComponent(entityId, Position);
+                const vel = world.getComponent(entityId, Velocity);
+                const stats = world.getComponent(entityId, OrganismStats);
+                const brain = world.getComponent(entityId, NeuralBrain);
+                
+                // If busy, don't think
+                if (stats.actionTimer > 0) continue;
+                
+                // Find nearest food
+                let dxFood = 0, dyFood = 0, distFood = 100;
+                if (allFoods.length > 0) {
+                    let closestFoodDistSq = Infinity;
+                    let closestFoodId = null;
+                    for (const foodId of allFoods) {
+                        const fPos = world.getComponent(foodId, Position);
+                        const dSq = Math.pow(fPos.x - pos.x, 2) + Math.pow(fPos.y - pos.y, 2);
+                        if (dSq < closestFoodDistSq) {
+                            closestFoodDistSq = dSq;
+                            closestFoodId = foodId;
+                        }
+                    }
+                    if (closestFoodId !== null) {
+                        const fPos = world.getComponent(closestFoodId, Position);
+                        distFood = Math.sqrt(closestFoodDistSq);
+                        if (distFood > 0) {
+                            dxFood = (fPos.x - pos.x) / distFood; // Normalized direction
+                            dyFood = (fPos.y - pos.y) / distFood;
+                        }
+                        // Normalize distance roughly 0 to 1 (max 40 tiles)
+                        distFood = Math.min(1.0, distFood / 40.0); 
+                    }
+                }
+                
+                // Find nearest mate (other agent)
+                let dxMate = 0, dyMate = 0, distMate = 1;
+                let closestMateDistSq = Infinity;
+                for (const otherId of agents) {
+                    if (otherId === entityId) continue;
+                    const oStats = world.getComponent(otherId, OrganismStats);
+                    if (oStats.age > 5 && oStats.energy > 60 && oStats.matingCooldown <= 0) {
+                        const oPos = world.getComponent(otherId, Position);
+                        const dSq = Math.pow(oPos.x - pos.x, 2) + Math.pow(oPos.y - pos.y, 2);
+                        if (dSq < closestMateDistSq) {
+                            closestMateDistSq = dSq;
+                            dxMate = oPos.x - pos.x;
+                            dyMate = oPos.y - pos.y;
+                        }
+                    }
+                }
+                if (closestMateDistSq !== Infinity) {
+                    const d = Math.sqrt(closestMateDistSq);
+                    if (d > 0) {
+                        dxMate /= d;
+                        dyMate /= d;
+                    }
+                    distMate = Math.min(1.0, d / 40.0);
+                }
+                
+                // Inputs:
+                // 1. Food DX (-1 to 1)
+                // 2. Food DY (-1 to 1)
+                // 3. Mate DX (-1 to 1)
+                // 4. Mate DY (-1 to 1)
+                // 5. Energy (0 to 1)
+                // 6. Age (0 to 1)
+                
+                const inputs = tf.tensor2d([[
+                    dxFood,
+                    dyFood,
+                    dxMate,
+                    dyMate,
+                    stats.energy / 100.0,
+                    Math.min(1.0, stats.age / stats.maxAge)
+                ]]);
+                
+                // Predict
+                const output = brain.model.predict(inputs);
+                const data = output.dataSync();
+                
+                // Output gives vx, vy in range -1 to 1 (tanh)
+                // Map to speed
+                const speed = 2.0;
+                vel.vx = data[0] * speed;
+                vel.vy = data[1] * speed;
+            }
+        });
+    }
+}
+
+/// Movement System (Phase 11 Option B: Pure Muscle)
 class MovementSystem extends System {
     update(world, dt) {
-        const entities = world.query([Position, Velocity, Path], this.queryResults);
-        
-        // Copy agents for avoidance to avoid modifying the array we are iterating
-        const activeAgents = [...entities];
+        const entities = world.query([Position, Velocity, OrganismStats], this.queryResults);
         
         for (const entityId of entities) {
             const pos = world.getComponent(entityId, Position);
             const vel = world.getComponent(entityId, Velocity);
-            const path = world.getComponent(entityId, Path);
             const stats = world.getComponent(entityId, OrganismStats);
             
             // If they are busy eating or doing an action, DO NOT move.
@@ -235,128 +323,27 @@ class MovementSystem extends System {
                 continue;
             }
             
-            // 1. Separation force to prevent tight overlaps
-            let sepX = 0, sepY = 0;
-            for (const otherId of activeAgents) {
-                if (otherId === entityId) continue;
-                const otherPos = world.getComponent(otherId, Position);
-                const dx = pos.x - otherPos.x;
-                const dy = pos.y - otherPos.y;
-                const distSq = dx * dx + dy * dy;
-                // If within 1 tile, apply strong repulsive force
-                if (distSq < 1.0) {
-                    if (distSq === 0) {
-                        // Perfect overlap, artificially split them
-                        sepX += (Math.random() - 0.5) * 0.1;
-                        sepY += (Math.random() - 0.5) * 0.1;
-                    } else {
-                        const dist = Math.sqrt(distSq);
-                        const safeDist = Math.max(0.2, dist); 
-                        sepX += (dx / dist) / safeDist; 
-                        sepY += (dy / dist) / safeDist;
-                    }
-                }
-            }
+            // Apply neural network velocity
+            let nextX = pos.x + vel.vx * dt;
+            let nextY = pos.y + vel.vy * dt;
             
-            // 2. If we have a path to follow
-            if (path.waypoints.length > path.currentWaypointIndex) {
-                const target = path.waypoints[path.currentWaypointIndex];
-                
-                const dx = target.x - pos.x;
-                const dy = target.y - pos.y;
-                const dist = Math.hypot(dx, dy);
-                
-                // If close enough to waypoint, move to next
-                if (dist < 0.5) {
-                    path.currentWaypointIndex++;
-                    vel.vx = 0;
-                    vel.vy = 0;
-                } else {
-                    // Move towards waypoint (speed = 2 tiles/sec)
-                    const speed = 2.0;
-                    
-                    // Blend pathfinding velocity with separation avoidance
-                    let clampedSepX = sepX * 0.8;
-                    let clampedSepY = sepY * 0.8;
-                    const sepMag = Math.hypot(clampedSepX, clampedSepY);
-                    if (sepMag > speed) {
-                        clampedSepX = (clampedSepX / sepMag) * speed;
-                        clampedSepY = (clampedSepY / sepMag) * speed;
-                    }
-                    
-                    vel.vx = (dx / dist) * speed + clampedSepX;
-                    vel.vy = (dy / dist) * speed + clampedSepY;
-                    
-                    // Normalize to max speed so they don't get launched
-                    const currentSpeed = Math.hypot(vel.vx, vel.vy);
-                    if (currentSpeed > speed * 1.5) {
-                        vel.vx = (vel.vx / currentSpeed) * speed * 1.5;
-                        vel.vy = (vel.vy / currentSpeed) * speed * 1.5;
-                    }
-                    
-                    let nextX = pos.x + vel.vx * dt;
-                    let nextY = pos.y + vel.vy * dt;
-                    
-                    // Prevent walking into water (Wall Sliding)
-                    if (astar && !astar._isWalkable(Math.round(nextX), Math.round(nextY))) {
-                        const canMoveX = astar._isWalkable(Math.round(nextX), Math.round(pos.y));
-                        const canMoveY = astar._isWalkable(Math.round(pos.x), Math.round(nextY));
-                        
-                        if (canMoveX && !canMoveY) {
-                            nextY = pos.y; // Slide along X
-                        } else if (canMoveY && !canMoveX) {
-                            nextX = pos.x; // Slide along Y
-                        } else {
-                            // Completely blocked (corner)
-                            nextX = pos.x;
-                            nextY = pos.y;
-                            // Abandon path to force recalculation
-                            path.waypoints = [];
-                            path.currentWaypointIndex = 0;
-                        }
-                    }
-                    
-                    pos.x = nextX;
-                    pos.y = nextY;
-                }
+            // Obstacle handling: The brain has to learn! 
+            // If they hit water, they just stop moving. No magical wall sliding!
+            if (astar && !astar._isWalkable(Math.round(nextX), Math.round(nextY))) {
+                vel.vx = 0;
+                vel.vy = 0;
+                // Penalize energy for walking into walls? (Optional)
+                // stats.energy -= 0.1; 
             } else {
-                // We reached the end of the path or have no path.
-                // Pick a random new target tile to wander to (only if not currently foraging for food)
-                // Wander occasionally or if full
-                if (!stats || stats.energy >= 80 || Math.random() < 0.05) {
-                    const targetX = Math.floor((Math.random() - 0.5) * 28);
-                    const targetY = Math.floor((Math.random() - 0.5) * 28);
-                    
-                    if (astar && astar._isWalkable(targetX, targetY)) {
-                        const newPath = astar.findPath(pos.x, pos.y, targetX, targetY);
-                        if (newPath && newPath.length > 0) {
-                            path.waypoints = newPath;
-                            path.currentWaypointIndex = 0;
-                        } else {
-                            // Failsafe: if path fails (maybe spawned in water), teleport to random walkable
-                            if (!astar._isWalkable(Math.round(pos.x), Math.round(pos.y))) {
-                                pos.x = targetX;
-                                pos.y = targetY;
-                            }
-                        }
-                    }
-                } else if (stats && stats.energy < 80) {
-                    // Hungry but no path (maybe food unreachable)
-                    // Spread out, but respect water boundaries!
-                    let nx = pos.x + sepX * dt * 0.5;
-                    let ny = pos.y + sepY * dt * 0.5;
-                    if (astar && astar._isWalkable(Math.round(nx), Math.round(ny))) {
-                        pos.x = nx;
-                        pos.y = ny;
-                    }
-                }
+                pos.x = nextX;
+                pos.y = nextY;
             }
             
-            // Boundary enforcement just in case
-            if (pos.x > 14) { pos.x = 14; }
-            if (pos.x < -14) { pos.x = -14; }
-            if (pos.y > 14) { pos.y = 14; }
-            if (pos.y < -14) { pos.y = -14; }
+            // Boundary enforcement
+            if (pos.x > 14) { pos.x = 14; vel.vx = 0; }
+            if (pos.x < -14) { pos.x = -14; vel.vx = 0; }
+            if (pos.y > 14) { pos.y = 14; vel.vy = 0; }
+            if (pos.y < -14) { pos.y = -14; vel.vy = 0; }
         }
     }
 }
@@ -687,6 +674,7 @@ function boot() {
     // Add Systems
     world.addSystem(new TimeSystem());
     world.addSystem(new BiologySystem());
+    world.addSystem(new BrainSystem());
     world.addSystem(new ForagingSystem());
     world.addSystem(new MovementSystem());
     world.addSystem(new ReproductionSystem());
@@ -721,7 +709,8 @@ function boot() {
 
         world.addComponent(entityId, new Position(x, y));
         world.addComponent(entityId, new Velocity(0, 0));
-        world.addComponent(entityId, new Path()); // Phase 7 Pathfinding
+        world.addComponent(entityId, new OrganismStats());
+        world.addComponent(entityId, new NeuralBrain()); // Phase 7 Pathfinding
         
         // Random color
         const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
@@ -792,7 +781,11 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     
     world.addComponent(childId, new Position(spawnX, spawnY));
     world.addComponent(childId, new Velocity(0, 0));
-    world.addComponent(childId, new Path());
+    
+    // Pass parent brains to crossover
+    const brainA = world.getComponent(parentAId, NeuralBrain);
+    const brainB = world.getComponent(parentBId, NeuralBrain);
+    world.addComponent(childId, new NeuralBrain(brainA.model, brainB.model));
     
     // Genetics: Blend Colors
     const rA = parseInt(rendA.color.slice(1, 3), 16);
