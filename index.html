@@ -4,20 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Emergent: Isometric Neuroevolution</title>
-    <link rel="stylesheet" href="style.css">
-    
-    <!-- Load TensorFlow.js (needed for Overmind later) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <!-- Main game canvas for isometric rendering -->
     <canvas id="game-canvas"></canvas>
     
-    <!-- Diegetic UI Overlay (to be expanded in Phase 4) -->
     <div id="ui-layer">
         <div id="top-bar">
             <h1>EMERGENT <span>v2.0 Alpha</span></h1>
-            <div id="stats-pill">Entities: <span id="entity-count">0</span> | FPS: <span id="fps-counter">0</span></div>
+            <div id="stats-pill">
+                <span class="icon">🌍</span>
+                Entities: <span id="entity-count">0</span> | FPS: <span id="fps-counter">0</span>
+            </div>
+        </div>
+        
+        <!-- Inspector Panel for Phase 9 -->
+        <div id="inspector-panel" class="glass-panel">
+            <div class="insp-header">
+                <h3>Agent Info</h3>
+                <span id="insp-age">Age: 0</span>
+            </div>
+            <div class="stat-bar">
+                <label>Health</label>
+                <div class="bar-bg"><div id="insp-health" class="bar-fill" style="background: #ef4444; width: 100%;"></div></div>
+            </div>
+            <div class="stat-bar">
+                <label>Energy</label>
+                <div class="bar-bg"><div id="insp-energy" class="bar-fill" style="background: #eab308; width: 100%;"></div></div>
+            </div>
         </div>
     </div>
 
@@ -27,6 +42,7 @@
     <script src="js/engine/isometric.js"></script>
     <script src="js/engine/renderer.js"></script>
     <script src="js/engine/terrain.js"></script>
+    <script src="js/engine/pathfinding.js"></script>
     
     <!-- Game Scripts -->
     <script src="js/game.js"></script>

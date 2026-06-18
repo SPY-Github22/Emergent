@@ -38,6 +38,73 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
+}
+
+/* Phase 9 Inspector Panel */
+#inspector-panel {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 200px;
+    padding: 12px;
+    border-radius: 12px;
+    pointer-events: none; /* Let clicks pass through to canvas */
+    transition: opacity 0.2s, transform 0.1s ease-out;
+    opacity: 0;
+    transform: scale(0.9);
+}
+
+#inspector-panel.active {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.insp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 4px;
+}
+
+.insp-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.insp-header span {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.stat-bar {
+    margin-bottom: 8px;
+}
+
+.stat-bar label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.bar-bg {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.2s ease-out;
 }
 
 h1 {

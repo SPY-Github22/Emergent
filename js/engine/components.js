@@ -18,17 +18,26 @@ class Velocity {
 }
 
 class Renderable {
-    constructor(color = '#FFFFFF', radius = 5) {
+    constructor(color = '#ffffff', radius = 10) {
         this.color = color;
         this.radius = radius;
+        this.shape = Math.floor(Math.random() * 3); // 0, 1, or 2
     }
 }
 
 class OrganismStats {
-    constructor(energy = 100, health = 100) {
-        this.energy = energy;
-        this.health = health;
+    constructor() {
         this.age = 0;
+        this.maxAge = 60 + Math.random() * 40; // 60 to 100 seconds
+        this.energy = 100;
+        this.health = 100;
+        
+        this.actionTimer = 0;
+        this.actionTarget = null;
+        
+        // Genetics & Reproduction (Phase 10)
+        this.generation = 1;
+        this.matingCooldown = 0;
     }
 }
 
@@ -49,6 +58,30 @@ class TerrainTile {
     }
 }
 
+class Path {
+    constructor() {
+        this.waypoints = [];
+        this.currentWaypointIndex = 0;
+    }
+}
+
+class Food {
+    constructor(energyValue = 15, capacity = 3) {
+        this.energyValue = energyValue;
+        this.capacity = capacity;
+        this.maxCapacity = capacity;
+    }
+}
+
+class Particle {
+    constructor(text = "+30", color = "#4ade80", lifetime = 1.0) {
+        this.text = text;
+        this.color = color;
+        this.maxLifetime = lifetime;
+        this.lifetime = lifetime;
+    }
+}
+
 // Export to global scope
 window.Position = Position;
 window.Velocity = Velocity;
@@ -56,3 +89,6 @@ window.Renderable = Renderable;
 window.OrganismStats = OrganismStats;
 window.NeuralBrain = NeuralBrain;
 window.TerrainTile = TerrainTile;
+window.Path = Path;
+window.Food = Food;
+window.Particle = Particle;

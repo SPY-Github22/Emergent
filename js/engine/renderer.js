@@ -115,6 +115,25 @@ class Renderer {
             }
         }
     }
+
+    /**
+     * Convert mouse event screen coordinates to 3D world coordinates (Z=0)
+     */
+    getMouseWorldCoordinates(clientX, clientY) {
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+
+        let x = clientX - centerX;
+        let y = clientY - centerY;
+
+        x /= this.camera.zoom;
+        y /= this.camera.zoom;
+
+        x += this.camera.x;
+        y += this.camera.y;
+
+        return this.isoMath.screenToWorld(x, y);
+    }
 }
 
 // Expose to global scope (no ES6 modules to avoid file:// CORS issues)
