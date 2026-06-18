@@ -41,16 +41,7 @@ class OrganismStats {
     }
 }
 
-class NeuralBrain {
-    constructor(network = null) {
-        // Can hold a neural network instance or its configuration
-        this.network = network; 
-        
-        // Caching inputs/outputs arrays to avoid GC
-        this.inputs = [];
-        this.outputs = [];
-    }
-}
+
 
 class TerrainTile {
     constructor(type = 'grass') {

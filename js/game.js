@@ -77,6 +77,17 @@ class BiologySystem extends System {
                 world.destroyEntity(entityId);
             }
         }
+        
+        // Extinction Failsafe
+        // If the population crashes because Generation 1 is too stupid to eat,
+        // we inject fresh randomized agents to keep evolution going!
+        let aliveCount = world.query([OrganismStats], []).length;
+        if (aliveCount < 5) {
+            console.log("Extinction Failsafe! Spawning 5 new random agents...");
+            for (let i = 0; i < 5; i++) {
+                spawnAgent();
+            }
+        }
     }
 }
 
@@ -215,15 +226,20 @@ class BrainSystem extends System {
         // But for simplicity in JS without proper batching setup, we'll do individual predictions
         // tf.tidy is crucial here to prevent memory leaks!
         
-        tf.tidy(() => {
-            for (const entityId of agents) {
-                const pos = world.getComponent(entityId, Position);
-                const vel = world.getComponent(entityId, Velocity);
-                const stats = world.getComponent(entityId, OrganismStats);
-                const brain = world.getComponent(entityId, NeuralBrain);
-                
-                // If busy, don't think
-                if (stats.actionTimer > 0) continue;
+        for (const entityId of agents) {
+            const pos = world.getComponent(entityId, Position);
+            const vel = world.getComponent(entityId, Velocity);
+            const stats = world.getComponent(entityId, OrganismStats);
+            const brain = world.getComponent(entityId, NeuralBrain);
+            
+            // If busy, don't think
+            if (stats.actionTimer > 0) continue;
+            
+            // Limit thinking to 4 times a second (0.25s) to prevent FPS lag!
+            if (stats.thinkTimer === undefined) stats.thinkTimer = Math.random() * 0.25;
+            stats.thinkTimer -= dt;
+            if (stats.thinkTimer > 0) continue;
+            stats.thinkTimer = 0.25;
                 
                 // Find nearest food
                 let dxFood = 0, dyFood = 0, distFood = 100;
@@ -283,26 +299,27 @@ class BrainSystem extends System {
                 // 5. Energy (0 to 1)
                 // 6. Age (0 to 1)
                 
-                const inputs = tf.tensor2d([[
-                    dxFood,
-                    dyFood,
-                    dxMate,
-                    dyMate,
-                    stats.energy / 100.0,
-                    Math.min(1.0, stats.age / stats.maxAge)
-                ]]);
-                
-                // Predict
-                const output = brain.model.predict(inputs);
-                const data = output.dataSync();
-                
-                // Output gives vx, vy in range -1 to 1 (tanh)
-                // Map to speed
-                const speed = 2.0;
-                vel.vx = data[0] * speed;
-                vel.vy = data[1] * speed;
+                tf.tidy(() => {
+                    const inputs = tf.tensor2d([[
+                        dxFood,
+                        dyFood,
+                        dxMate,
+                        dyMate,
+                        stats.energy / 100.0,
+                        Math.min(1.0, stats.age / stats.maxAge)
+                    ]]);
+                    
+                    // Predict
+                    const output = brain.model.predict(inputs);
+                    const data = output.dataSync();
+                    
+                    // Output gives vx, vy in range -1 to 1 (tanh)
+                    // Map to speed
+                    const speed = 2.0;
+                    vel.vx = data[0] * speed;
+                    vel.vy = data[1] * speed;
+                });
             }
-        });
     }
 }
 
@@ -596,6 +613,13 @@ class RenderSystem extends System {
 function boot() {
     console.log("Booting Emergent v2.0...");
     
+    // For very tiny models (like our 6-8-8-2 network), the CPU backend is actually 
+    // MUCH faster than WebGL because it avoids the massive overhead of uploading/downloading 
+    // tiny arrays to the GPU every frame!
+    tf.setBackend('cpu').then(() => {
+        console.log("TensorFlow.js using CPU backend for tiny model performance.");
+    });
+
     // 1. Setup Canvas
     const canvas = document.getElementById('game-canvas');
     canvas.width = window.innerWidth;
@@ -698,26 +722,7 @@ function boot() {
 
     // 5. Spawn Test Entities
     for (let i = 0; i < 50; i++) {
-        const entityId = world.createEntity();
-        
-        // Spawn them randomly but ensure they are on walkable tiles
-        let x = 0, y = 0;
-        do {
-            x = Math.floor((Math.random() - 0.5) * 20);
-            y = Math.floor((Math.random() - 0.5) * 20);
-        } while (!astar._isWalkable(x, y));
-
-        world.addComponent(entityId, new Position(x, y));
-        world.addComponent(entityId, new Velocity(0, 0));
-        world.addComponent(entityId, new OrganismStats());
-        world.addComponent(entityId, new NeuralBrain()); // Phase 7 Pathfinding
-        
-        // Random color
-        const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
-        const color = colors[Math.floor(Math.random() * colors.length)];
-        world.addComponent(entityId, new Renderable(color, 15 + Math.random() * 15));
-        // Phase 6: Assign Biology Stats
-        world.addComponent(entityId, new OrganismStats());
+        spawnAgent();
     }
 
     // 5. Start Game Loop
@@ -790,8 +795,6 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     // Genetics: Blend Colors
     const rA = parseInt(rendA.color.slice(1, 3), 16);
     const gA = parseInt(rendA.color.slice(3, 5), 16);
-    const bA = parseInt(rendA.color.slice(5, 7), 16);
-    
     const rB = parseInt(rendB.color.slice(1, 3), 16);
     const gB = parseInt(rendB.color.slice(3, 5), 16);
     const bB = parseInt(rendB.color.slice(5, 7), 16);
@@ -822,6 +825,28 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     childStats.energy = 60; // Born with some energy
     
     world.addComponent(childId, childStats);
+}
+
+function spawnAgent() {
+    const entityId = world.createEntity();
+    
+    let x = 0, y = 0;
+    let attempts = 0;
+    do {
+        x = Math.floor((Math.random() - 0.5) * 20);
+        y = Math.floor((Math.random() - 0.5) * 20);
+        attempts++;
+    } while (astar && !astar._isWalkable(x, y) && attempts < 100);
+
+    world.addComponent(entityId, new Position(x, y));
+    world.addComponent(entityId, new Velocity(0, 0));
+    world.addComponent(entityId, new OrganismStats());
+    world.addComponent(entityId, new NeuralBrain());
+    
+    const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    world.addComponent(entityId, new Renderable(color, 15 + Math.random() * 15));
+    return entityId;
 }
 
 function gameLoop(now) {
