@@ -11,6 +11,10 @@ let lastTime = performance.now();
 let frameCount = 0;
 let lastFpsTime = performance.now();
 let selectedEntityId = null;
+let hoveredEntityId = null;
+let isPaused = false;
+let gameSpeed = 1;
+let canvas = null;
 
 // Handles Time & Environment (Phase 5)
 class TimeSystem extends System {
@@ -577,6 +581,26 @@ class RenderSystem extends System {
                     ctx.lineWidth = 1;
                     ctx.stroke();
 
+                    // Render Name on Hover
+                    if (entityId === hoveredEntityId && shapeType !== 'food') {
+                        const stats = world.getComponent(entityId, OrganismStats);
+                        if (stats) {
+                            const nameText = stats.name;
+                            ctx.font = '600 12px Inter, sans-serif';
+                            ctx.textAlign = 'center';
+                            const textWidth = ctx.measureText(nameText).width;
+                            const badgeY = -rend.radius * 3 - 10;
+                            
+                            ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; // Dark glassmorphic background
+                            ctx.beginPath();
+                            ctx.roundRect(-textWidth/2 - 6, badgeY - 14, textWidth + 12, 20, 4);
+                            ctx.fill();
+                            
+                            ctx.fillStyle = '#f8fafc'; // White text
+                            ctx.fillText(nameText, 0, badgeY);
+                        }
+                    }
+
                     // Draw a tiny plus sign inside food
                     if (shapeType === 'food') {
                         ctx.beginPath();
@@ -637,14 +661,13 @@ function boot() {
     });
 
     // Initialize Game
-    const canvas = document.getElementById('game-canvas');
-    const world = new ECS();
-    const renderer = new IsometricRenderer(canvas);
-    let astar = null;
+    canvas = document.getElementById('game-canvas');
+    world = new World();
+    astar = null;
 
     // Game State Controls (Phase 12)
-    let isPaused = false;
-    let gameSpeed = 1;
+    isPaused = false;
+    gameSpeed = 1;
 
     // Setup Terrain
     let terrainGrid = [];
@@ -879,7 +902,7 @@ function spawnAgent(startX = null, startY = null) {
     return entityId;
 }
 
-let lastTime = performance.now();
+lastTime = performance.now();
 function gameLoop(now) {
     let dtMs = now - lastTime;
     lastTime = now;
@@ -924,8 +947,51 @@ document.getElementById('btn-speed-1x').addEventListener('click', () => setSpeed
 document.getElementById('btn-speed-2x').addEventListener('click', () => setSpeed(2, 'btn-speed-2x'));
 document.getElementById('btn-speed-5x').addEventListener('click', () => setSpeed(5, 'btn-speed-5x'));
 
+// Sandbox Menu Toggle
+const sandboxPanel = document.getElementById('sandbox-panel');
+document.getElementById('btn-toggle-sandbox').addEventListener('click', () => {
+    sandboxPanel.classList.toggle('collapsed');
+});
+
+// Sandbox Slider Updates (Visual only for now)
+['food-rate', 'pop-cap', 'mutation'].forEach(id => {
+    const slider = document.getElementById(`slider-${id}`);
+    const valSpan = document.getElementById(`val-${id}`);
+    if (slider && valSpan) {
+        slider.addEventListener('input', (e) => {
+            valSpan.textContent = e.target.value;
+        });
+    }
+});
+
 // "God Mode" Interactions
 canvas.addEventListener('contextmenu', e => e.preventDefault()); // Prevent right click menu
+
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    const screenPosX = (mouseX - centerX) / renderer.camera.zoom + renderer.camera.x;
+    const screenPosY = (mouseY - centerY) / renderer.camera.zoom + renderer.camera.y;
+    
+    const worldPos = renderer.isoMath.screenToWorld(screenPosX, screenPosY);
+    
+    const agents = world.query([Position, OrganismStats]);
+    hoveredEntityId = null;
+    for (const id of agents) {
+        const pos = world.getComponent(id, Position);
+        const dist = Math.hypot(pos.x - worldPos.x, pos.y - worldPos.y);
+        if (dist < 1.5) {
+            hoveredEntityId = id;
+            break;
+        }
+    }
+});
+
 canvas.addEventListener('mousedown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -1103,5 +1169,7 @@ async function applyReinforcement(agentId, isReward) {
 }
 
 requestAnimationFrame(gameLoop);
+
+}
 
 window.onload = boot;

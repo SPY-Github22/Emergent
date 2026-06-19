@@ -3,6 +3,14 @@
  * Definitions for initial ECS components.
  */
 
+const SYLLABLES = ["ka", "ro", "li", "mi", "na", "so", "tu", "vi", "za", "el", "ar", "om", "ix", "un", "og"];
+function generateName() {
+    const len = Math.floor(Math.random() * 2) + 2; // 2 or 3 syllables
+    let name = "";
+    for(let i=0; i<len; i++) name += SYLLABLES[Math.floor(Math.random() * SYLLABLES.length)];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 class Position {
     constructor(x = 0, y = 0) {
         this.x = x;
@@ -28,7 +36,8 @@ class Renderable {
 }
 
 class OrganismStats {
-    constructor() {
+    constructor(generation = 1) {
+        this.name = generateName();
         this.age = 0;
         this.maxAge = 60 + Math.random() * 40; // 60 to 100 seconds
         this.energy = 100;
@@ -136,6 +145,5 @@ window.Renderable = Renderable;
 window.OrganismStats = OrganismStats;
 window.NeuralBrain = NeuralBrain;
 window.TerrainTile = TerrainTile;
-window.Path = Path;
 window.Food = Food;
 window.Particle = Particle;

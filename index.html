@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Emergent: Isometric Neuroevolution</title>
     <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Load TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
 </head>
@@ -24,7 +25,7 @@
         <!-- Inspector Panel for Phase 9 -->
         <div id="inspector-panel" class="glass-panel">
             <div class="insp-header">
-                <h3>Agent Info</h3>
+                <h3 id="insp-name">Agent Name</h3>
                 <span id="insp-age">Age: 0</span>
             </div>
             <div class="stat-bar">
@@ -47,6 +48,27 @@
             <button id="btn-save-brain">💾 Save Best</button>
             <input type="file" id="btn-load-brain" style="display: none;" accept=".json">
             <button onclick="document.getElementById('btn-load-brain').click()">📂 Load Brain</button>
+        </div>
+        <!-- Sandbox Menu -->
+        <div id="sandbox-panel" class="glass-panel">
+            <div class="panel-header">
+                <h2>God Mode Settings</h2>
+                <button id="btn-toggle-sandbox" class="icon-btn">⚙️</button>
+            </div>
+            <div class="panel-content">
+                <div class="setting-group">
+                    <label>Food Spawn Rate <span id="val-food-rate">5</span>/s</label>
+                    <input type="range" id="slider-food-rate" min="0" max="20" value="5">
+                </div>
+                <div class="setting-group">
+                    <label>Max Population <span id="val-pop-cap">30</span></label>
+                    <input type="range" id="slider-pop-cap" min="5" max="100" value="30">
+                </div>
+                <div class="setting-group">
+                    <label>Mutation Volatility <span id="val-mutation">10</span>%</label>
+                    <input type="range" id="slider-mutation" min="1" max="100" value="10">
+                </div>
+            </div>
         </div>
     </div>
 

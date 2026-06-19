@@ -41,14 +41,22 @@ body {
     gap: 12px;
 }
 
+.glass-panel {
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    border-radius: 12px;
+    color: #f8fafc;
+}
+
 /* Phase 9 Inspector Panel */
 #inspector-panel {
     position: absolute;
     top: 50%;
     left: 50%;
     width: 200px;
-    padding: 12px;
-    border-radius: 12px;
+    padding: 16px;
     pointer-events: none; /* Let clicks pass through to canvas */
     transition: opacity 0.2s, transform 0.1s ease-out;
     opacity: 0;
@@ -136,38 +144,130 @@ h1 span {
 
 #control-bar {
     position: absolute;
-    bottom: 20px;
+    bottom: 24px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    gap: 10px;
+    gap: 12px;
     align-items: center;
     padding: 12px 24px;
+    border-radius: 16px;
+    pointer-events: auto;
 }
 
 #control-bar button {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #f8fafc;
-    padding: 8px 16px;
+    padding: 10px 18px;
     border-radius: 8px;
-    font-weight: 600;
+    font-weight: 500;
+    font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #control-bar button:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+#control-bar button:active {
+    transform: translateY(0);
 }
 
 #control-bar button.active {
     background: #3b82f6;
     border-color: #60a5fa;
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
 }
 
 #control-bar .divider {
     width: 1px;
     height: 24px;
     background: rgba(255, 255, 255, 0.2);
-    margin: 0 10px;
+    margin: 0 8px;
+}
+
+/* Phase 14 Sandbox Panel */
+#sandbox-panel {
+    position: absolute;
+    top: 80px;
+    right: 24px;
+    width: 280px;
+    padding: 20px;
+    pointer-events: auto;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#sandbox-panel.collapsed {
+    transform: translateX(320px);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.panel-header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: #f8fafc;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+.icon-btn:hover {
+    transform: rotate(90deg);
+}
+
+.setting-group {
+    margin-bottom: 18px;
+}
+
+.setting-group label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.setting-group label span {
+    color: #f8fafc;
+    font-weight: 600;
+}
+
+.setting-group input[type="range"] {
+    width: 100%;
+    accent-color: #3b82f6;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.1);
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.setting-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.setting-group input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
 }
