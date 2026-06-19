@@ -130,11 +130,14 @@ class Food {
 }
 
 class Particle {
-    constructor(text = "+30", color = "#4ade80", lifetime = 1.0) {
+    constructor(text = "+30", color = "#4ade80", lifetime = 1.0, isText = true) {
         this.text = text;
         this.color = color;
         this.maxLifetime = lifetime;
         this.lifetime = lifetime;
+        this.isText = isText;
+        this.vx = (Math.random() - 0.5) * 40;
+        this.vy = (Math.random() - 0.5) * 40;
     }
 }
 

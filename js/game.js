@@ -67,6 +67,15 @@ class BiologySystem extends System {
             if (stats.energy <= 0) {
                 stats.energy = 0;
                 stats.health -= 2 * dt;
+                // Occasional starvation indicator
+                if (Math.random() < 0.02) { 
+                    const pos = world.getComponent(entityId, Position);
+                    if (pos) {
+                        const pId = world.createEntity();
+                        world.addComponent(pId, new Position(pos.x, pos.y));
+                        world.addComponent(pId, new Particle("-1", '#ef4444', 1.0));
+                    }
+                }
             } else if (stats.energy > 50 && stats.health < 100) {
                 // Natural healing if well fed
                 stats.health += 1 * dt;
@@ -448,8 +457,19 @@ class ParticleSystem extends System {
     update(world, dt) {
         const particles = world.query([Position, Particle], this.queryResults);
         for (const entityId of particles) {
+            const pos = world.getComponent(entityId, Position);
             const part = world.getComponent(entityId, Particle);
+            
             part.lifetime -= dt;
+            
+            if (!part.isText) {
+                // Sparks spread out and fall down (like gravity)
+                pos.x += part.vx * dt;
+                pos.y += part.vy * dt;
+                part.vx *= 0.9; // Friction
+                part.vy *= 0.9;
+            }
+            
             if (part.lifetime <= 0) {
                 world.destroyEntity(entityId);
             }
@@ -636,11 +656,30 @@ class RenderSystem extends System {
                 worldY: pos.y,
                 worldZ: zOffset + floatZ + 0.5,
                 draw: (ctx) => {
-                    ctx.fillStyle = part.color;
                     ctx.globalAlpha = Math.max(0, part.lifetime / part.maxLifetime);
-                    ctx.font = 'bold 16px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(part.text, 0, -10);
+                    
+                    if (part.isText) {
+                        ctx.font = '900 20px Inter, sans-serif';
+                        ctx.textAlign = 'center';
+                        
+                        // Text outline for RPG style pop
+                        ctx.strokeStyle = '#0f172a';
+                        ctx.lineWidth = 4;
+                        ctx.strokeText(part.text, 0, -10);
+                        
+                        ctx.fillStyle = part.color;
+                        ctx.fillText(part.text, 0, -10);
+                    } else {
+                        // Draw Spark
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        ctx.lineTo(-part.vx * 0.3, -part.vy * 0.3);
+                        ctx.strokeStyle = part.color;
+                        ctx.lineWidth = 3;
+                        ctx.lineCap = 'round';
+                        ctx.stroke();
+                    }
+                    
                     ctx.globalAlpha = 1.0;
                 }
             });
@@ -875,6 +914,14 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     world.addComponent(childId, childStats);
 }
 
+function spawnSparks(x, y, color) {
+    for (let i = 0; i < 6; i++) {
+        const sId = world.createEntity();
+        world.addComponent(sId, new Position(x, y));
+        world.addComponent(sId, new Particle('', color, 0.4 + Math.random() * 0.4, false));
+    }
+}
+
 function spawnAgent(startX = null, startY = null) {
     const entityId = world.createEntity();
     
@@ -1030,6 +1077,7 @@ canvas.addEventListener('mousedown', (e) => {
             const pId = world.createEntity();
             world.addComponent(pId, new Position(pos.x, pos.y));
             world.addComponent(pId, new Particle("REWARD!", '#4ade80', 2.0));
+            spawnSparks(pos.x, pos.y, '#4ade80');
         } else if (e.button === 2) {
             // Right click agent: PUNISH (Zap + RL)
             // Non-lethal punishment: they can survive if they learn their lesson!
@@ -1040,6 +1088,7 @@ canvas.addEventListener('mousedown', (e) => {
             const pId = world.createEntity();
             world.addComponent(pId, new Position(pos.x, pos.y));
             world.addComponent(pId, new Particle("PUNISH!", '#ef4444', 2.0));
+            spawnSparks(pos.x, pos.y, '#ef4444');
         }
     } else {
         if (e.button === 0) {
