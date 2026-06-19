@@ -14,6 +14,8 @@ class Velocity {
     constructor(vx = 0, vy = 0) {
         this.vx = vx;
         this.vy = vy;
+        this.targetVx = 0;
+        this.targetVy = 0;
     }
 }
 
@@ -35,9 +37,12 @@ class OrganismStats {
         this.actionTimer = 0;
         this.actionTarget = null;
         
-        // Genetics & Reproduction (Phase 10)
+        // Genetics & Reproduction
         this.generation = 1;
         this.matingCooldown = 0;
+        
+        // Conscious Actions (Phase 11 Update)
+        this.wantToEat = false;
     }
 }
 
@@ -52,9 +57,8 @@ class TerrainTile {
 // Neural Brain for Phase 11
 class NeuralBrain {
     constructor(parentModelA = null, parentModelB = null) {
-        // Option B: Muscle Brain
-        // Inputs (6): dx Food, dy Food, dx Mate, dy Mate, Energy, Age
-        // Outputs (2): vx, vy (-1 to 1)
+        this.memory = null;
+        this.compiled = false;
         
         if (parentModelA && parentModelB) {
             // Neuroevolution: Inherit and mutate
@@ -64,7 +68,7 @@ class NeuralBrain {
             this.model = tf.sequential();
             this.model.add(tf.layers.dense({ units: 8, inputShape: [6], activation: 'relu' }));
             this.model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
-            this.model.add(tf.layers.dense({ units: 2, activation: 'tanh' })); // Outputs between -1 and 1
+            this.model.add(tf.layers.dense({ units: 3, activation: 'tanh' })); // Outputs: vx, vy, wantToEat
         }
     }
     
@@ -73,7 +77,7 @@ class NeuralBrain {
             const childModel = tf.sequential();
             childModel.add(tf.layers.dense({ units: 8, inputShape: [6], activation: 'relu' }));
             childModel.add(tf.layers.dense({ units: 8, activation: 'relu' }));
-            childModel.add(tf.layers.dense({ units: 2, activation: 'tanh' }));
+            childModel.add(tf.layers.dense({ units: 3, activation: 'tanh' }));
             
             const weightsA = parentA.getWeights();
             const weightsB = parentB.getWeights();
@@ -105,13 +109,6 @@ class NeuralBrain {
             childModel.setWeights(childWeights);
             return childModel;
         });
-    }
-}
-
-class Path {
-    constructor() {
-        this.waypoints = [];
-        this.currentWaypointIndex = 0;
     }
 }
 

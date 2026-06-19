@@ -74,6 +74,10 @@ class BiologySystem extends System {
                     selectedEntityId = null;
                     document.getElementById('inspector-panel').classList.remove('active');
                 }
+                const brain = world.getComponent(entityId, NeuralBrain);
+                if (brain && brain.model) {
+                    brain.model.dispose(); // Prevent Memory Leak
+                }
                 world.destroyEntity(entityId);
             }
         }
@@ -147,17 +151,17 @@ class InteractionSystem extends System {
 // Foraging System: Agents look for food and eat it (Phase 9)
 class ForagingSystem extends System {
     update(world, dt) {
-        const agents = world.query([Position, OrganismStats, Path], this.queryResults);
+        const agents = world.query([Position, OrganismStats, Velocity], this.queryResults);
         // Use a separate array for food to not clobber queryResults
         const allFoods = world.query([Position, Food], []);
         
         for (const agentId of agents) {
             const stats = world.getComponent(agentId, OrganismStats);
             const pos = world.getComponent(agentId, Position);
-            const path = world.getComponent(agentId, Path);
+            const vel = world.getComponent(agentId, Velocity);
             
-            // If hungry, look for food
-            if (stats.energy < 80 && allFoods.length > 0) {
+            // Only eat if hungry, food exists, AND the Brain specifically chose to activate its mouth!
+            if (stats.energy < 80 && allFoods.length > 0 && stats.wantToEat) {
                 let closestFoodId = null;
                 let closestDist = Infinity;
                 
@@ -257,12 +261,16 @@ class BrainSystem extends System {
                     if (closestFoodId !== null) {
                         const fPos = world.getComponent(closestFoodId, Position);
                         distFood = Math.sqrt(closestFoodDistSq);
-                        if (distFood > 0) {
+                        if (distFood > 10.0) { // SIGHT RADIUS
+                            distFood = 10.0;
+                            dxFood = 0;
+                            dyFood = 0;
+                        } else if (distFood > 0) {
                             dxFood = (fPos.x - pos.x) / distFood; // Normalized direction
                             dyFood = (fPos.y - pos.y) / distFood;
                         }
-                        // Normalize distance roughly 0 to 1 (max 40 tiles)
-                        distFood = Math.min(1.0, distFood / 40.0); 
+                        // Normalize distance roughly 0 to 1 (max 10 tiles)
+                        distFood = Math.min(1.0, distFood / 10.0); 
                     }
                 }
                 
@@ -284,40 +292,42 @@ class BrainSystem extends System {
                 }
                 if (closestMateDistSq !== Infinity) {
                     const d = Math.sqrt(closestMateDistSq);
-                    if (d > 0) {
+                    if (d > 10.0) { // SIGHT RADIUS
+                        distMate = 1.0;
+                        dxMate = 0;
+                        dyMate = 0;
+                    } else if (d > 0) {
                         dxMate /= d;
                         dyMate /= d;
+                        distMate = Math.min(1.0, d / 10.0);
                     }
-                    distMate = Math.min(1.0, d / 40.0);
                 }
                 
-                // Inputs:
-                // 1. Food DX (-1 to 1)
-                // 2. Food DY (-1 to 1)
-                // 3. Mate DX (-1 to 1)
-                // 4. Mate DY (-1 to 1)
-                // 5. Energy (0 to 1)
-                // 6. Age (0 to 1)
-                
                 tf.tidy(() => {
-                    const inputs = tf.tensor2d([[
-                        dxFood,
-                        dyFood,
-                        dxMate,
-                        dyMate,
+                    const inputArray = [
+                        dxFood, dyFood, dxMate, dyMate,
                         stats.energy / 100.0,
                         Math.min(1.0, stats.age / stats.maxAge)
-                    ]]);
+                    ];
+                    const inputs = tf.tensor2d([inputArray]);
                     
                     // Predict
                     const output = brain.model.predict(inputs);
                     const data = output.dataSync();
                     
-                    // Output gives vx, vy in range -1 to 1 (tanh)
-                    // Map to speed
+                    // Short Term Memory for RL
+                    brain.memory = {
+                        inputs: inputArray,
+                        outputs: Array.from(data)
+                    };
+                    
+                    // Output gives target velocity in range -1 to 1 (tanh)
                     const speed = 2.0;
-                    vel.vx = data[0] * speed;
-                    vel.vy = data[1] * speed;
+                    vel.targetVx = data[0] * speed;
+                    vel.targetVy = data[1] * speed;
+                    
+                    // Output 3 is mouth activation. > 0 means trying to eat.
+                    stats.wantToEat = data[2] > 0;
                 });
             }
     }
@@ -337,8 +347,14 @@ class MovementSystem extends System {
             if (stats && stats.actionTimer > 0) {
                 vel.vx = 0;
                 vel.vy = 0;
+                vel.targetVx = 0;
+                vel.targetVy = 0;
                 continue;
             }
+            
+            // Momentum (Lerp velocity towards target)
+            vel.vx += (vel.targetVx - vel.vx) * 5.0 * dt;
+            vel.vy += (vel.targetVy - vel.vy) * 5.0 * dt;
             
             // Apply neural network velocity
             let nextX = pos.x + vel.vx * dt;
@@ -620,11 +636,19 @@ function boot() {
         console.log("TensorFlow.js using CPU backend for tiny model performance.");
     });
 
-    // 1. Setup Canvas
+    // Initialize Game
     const canvas = document.getElementById('game-canvas');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    
+    const world = new ECS();
+    const renderer = new IsometricRenderer(canvas);
+    let astar = null;
+
+    // Game State Controls (Phase 12)
+    let isPaused = false;
+    let gameSpeed = 1;
+
+    // Setup Terrain
+    let terrainGrid = [];
+
     // Handle resize
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
@@ -795,6 +819,7 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     // Genetics: Blend Colors
     const rA = parseInt(rendA.color.slice(1, 3), 16);
     const gA = parseInt(rendA.color.slice(3, 5), 16);
+    const bA = parseInt(rendA.color.slice(5, 7), 16);
     const rB = parseInt(rendB.color.slice(1, 3), 16);
     const gB = parseInt(rendB.color.slice(3, 5), 16);
     const bB = parseInt(rendB.color.slice(5, 7), 16);
@@ -827,16 +852,21 @@ function spawnOffspring(parentAId, parentBId, spawnX, spawnY) {
     world.addComponent(childId, childStats);
 }
 
-function spawnAgent() {
+function spawnAgent(startX = null, startY = null) {
     const entityId = world.createEntity();
     
     let x = 0, y = 0;
-    let attempts = 0;
-    do {
-        x = Math.floor((Math.random() - 0.5) * 20);
-        y = Math.floor((Math.random() - 0.5) * 20);
-        attempts++;
-    } while (astar && !astar._isWalkable(x, y) && attempts < 100);
+    if (startX !== null && startY !== null) {
+        x = startX;
+        y = startY;
+    } else {
+        let attempts = 0;
+        do {
+            x = Math.floor((Math.random() - 0.5) * 20);
+            y = Math.floor((Math.random() - 0.5) * 20);
+            attempts++;
+        } while (astar && !astar._isWalkable(x, y) && attempts < 100);
+    }
 
     world.addComponent(entityId, new Position(x, y));
     world.addComponent(entityId, new Velocity(0, 0));
@@ -849,26 +879,229 @@ function spawnAgent() {
     return entityId;
 }
 
+let lastTime = performance.now();
 function gameLoop(now) {
-    const dtMs = now - lastTime;
+    let dtMs = now - lastTime;
     lastTime = now;
     
-    // Cap dt to prevent massive jumps when tab is inactive
-    const dt = Math.min(dtMs / 1000, 0.1); 
-
-    // Update ECS
-    world.update(dt);
+    // Cap dt to prevent massive jumps if tab is inactive
+    if (dtMs > 100) dtMs = 100;
+    
+    // Fixed physics step
+    const dt = 1.0 / 60.0;
+    
+    if (!isPaused) {
+        for (let i = 0; i < gameSpeed; i++) {
+            world.update(dt);
+        }
+    }
+    
+    // Render happens exactly once per frame
+    renderer.render(world);
     
     // FPS Counter
-    frameCount++;
     if (now - lastFpsTime >= 1000) {
         document.getElementById('fps-counter').textContent = frameCount;
         frameCount = 0;
         lastFpsTime = now;
     }
+    
+// Phase 12: UI Control Bindings
+document.getElementById('btn-play-pause').addEventListener('click', (e) => {
+    isPaused = !isPaused;
+    e.target.textContent = isPaused ? '▶️ Play' : '⏸️ Pause';
+});
 
-    requestAnimationFrame(gameLoop);
+function setSpeed(speed, btnId) {
+    gameSpeed = speed;
+    ['btn-speed-1x', 'btn-speed-2x', 'btn-speed-5x'].forEach(id => {
+        document.getElementById(id).classList.remove('active');
+    });
+    document.getElementById(btnId).classList.add('active');
 }
 
-// Start
+document.getElementById('btn-speed-1x').addEventListener('click', () => setSpeed(1, 'btn-speed-1x'));
+document.getElementById('btn-speed-2x').addEventListener('click', () => setSpeed(2, 'btn-speed-2x'));
+document.getElementById('btn-speed-5x').addEventListener('click', () => setSpeed(5, 'btn-speed-5x'));
+
+// "God Mode" Interactions
+canvas.addEventListener('contextmenu', e => e.preventDefault()); // Prevent right click menu
+canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    // Reverse camera transform
+    const screenPosX = (mouseX - centerX) / renderer.camera.zoom + renderer.camera.x;
+    const screenPosY = (mouseY - centerY) / renderer.camera.zoom + renderer.camera.y;
+    
+    const worldPos = renderer.isoMath.screenToWorld(screenPosX, screenPosY);
+    
+    // Find if we clicked an agent
+    const agents = world.query([Position, OrganismStats]);
+    let clickedAgent = null;
+    for (const id of agents) {
+        const pos = world.getComponent(id, Position);
+        const dist = Math.hypot(pos.x - worldPos.x, pos.y - worldPos.y);
+        if (dist < 1.5) {
+            clickedAgent = id;
+            break;
+        }
+    }
+    
+    if (clickedAgent !== null) {
+        const stats = world.getComponent(clickedAgent, OrganismStats);
+        const pos = world.getComponent(clickedAgent, Position);
+        if (e.button === 0) {
+            // Left click agent: REWARD (Bless + RL)
+            stats.energy = 100;
+            stats.health = 100;
+            applyReinforcement(clickedAgent, true);
+            
+            const pId = world.createEntity();
+            world.addComponent(pId, new Position(pos.x, pos.y));
+            world.addComponent(pId, new Particle("REWARD!", '#4ade80', 2.0));
+        } else if (e.button === 2) {
+            // Right click agent: PUNISH (Zap + RL)
+            // Non-lethal punishment: they can survive if they learn their lesson!
+            stats.energy = Math.max(0, stats.energy - 20);
+            stats.health = Math.max(10, stats.health - 10);
+            applyReinforcement(clickedAgent, false);
+            
+            const pId = world.createEntity();
+            world.addComponent(pId, new Position(pos.x, pos.y));
+            world.addComponent(pId, new Particle("PUNISH!", '#ef4444', 2.0));
+        }
+    } else {
+        if (e.button === 0) {
+            // Left click empty: Spawn Food
+            const foodId = world.createEntity();
+            world.addComponent(foodId, new Position(worldPos.x, worldPos.y));
+            world.addComponent(foodId, new Food(15, 3));
+            world.addComponent(foodId, new Renderable('#facc15', 10));
+            world.getComponent(foodId, Renderable).shape = 'food';
+        } else if (e.button === 2) {
+            // Right click empty: Spawn Agent
+            spawnAgent(worldPos.x, worldPos.y);
+        }
+    }
+});
+
+// JSON Brain Export/Import
+document.getElementById('btn-save-brain').addEventListener('click', async () => {
+    // Find oldest living agent
+    const agents = world.query([OrganismStats, NeuralBrain]);
+    if (agents.length === 0) return alert("No agents alive to save!");
+    
+    let bestAgent = null;
+    let maxAge = -1;
+    for (const id of agents) {
+        const stats = world.getComponent(id, OrganismStats);
+        if (stats.age > maxAge) {
+            maxAge = stats.age;
+            bestAgent = id;
+        }
+    }
+    
+    const brain = world.getComponent(bestAgent, NeuralBrain);
+    const result = await brain.model.save(tf.io.withSaveHandler(async artifacts => artifacts));
+    
+    const brainData = {
+        modelTopology: result.modelTopology,
+        weightSpecs: result.weightSpecs,
+        weightData: Array.from(new Uint8Array(result.weightData)) // convert ArrayBuffer
+    };
+    
+    const blob = new Blob([JSON.stringify(brainData)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `champion_gen${world.getComponent(bestAgent, OrganismStats).generation}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('btn-load-brain').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        const json = JSON.parse(ev.target.result);
+        const weightData = new Uint8Array(json.weightData).buffer;
+        
+        const model = await tf.loadLayersModel(tf.io.fromMemory(
+            json.modelTopology, json.weightSpecs, weightData
+        ));
+        
+        // Spawn 5 agents with this exact brain
+        for (let i = 0; i < 5; i++) {
+            const newId = spawnAgent();
+            const brain = world.getComponent(newId, NeuralBrain);
+            brain.model.dispose(); // dispose the random one
+            
+            // Clone the loaded model so they don't share references
+            const clone = tf.sequential();
+            clone.add(tf.layers.dense({ units: 8, inputShape: [6], activation: 'relu' }));
+            clone.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+            clone.add(tf.layers.dense({ units: 3, activation: 'tanh' }));
+            
+            // Copy weights
+            const weights = model.getWeights();
+            const clonedWeights = weights.map(w => w.clone());
+            clone.setWeights(clonedWeights);
+            clonedWeights.forEach(t => t.dispose());
+            
+            world.addComponent(newId, new NeuralBrain(clone, clone)); // Pass it to constructor
+            // Wait, NeuralBrain constructor expects parentModelA and B for crossover.
+            // Let's just set the model directly.
+            const newBrain = world.getComponent(newId, NeuralBrain);
+            newBrain.model.dispose();
+            newBrain.model = clone;
+        }
+        model.dispose();
+        alert("Loaded 5 clones of the Champion Brain!");
+    };
+    reader.readAsText(file);
+});
+
+// Phase 13: God-Triggered RL Backpropagation
+async function applyReinforcement(agentId, isReward) {
+    const brain = world.getComponent(agentId, NeuralBrain);
+    if (!brain || !brain.memory) return;
+    
+    const { inputs, outputs } = brain.memory;
+    
+    // Calculate new target for Stochastic Gradient Descent
+    const targetArray = outputs.map(val => {
+        if (isReward) {
+            // Push output further towards its current extreme
+            return Math.max(-1, Math.min(1, val * 1.5 + Math.sign(val) * 0.1));
+        } else {
+            // Do the exact opposite!
+            return -val; 
+        }
+    });
+    
+    const inputTensor = tf.tensor2d([inputs]);
+    const targetTensor = tf.tensor2d([targetArray]);
+    
+    // Compile on first use
+    if (!brain.compiled) {
+        brain.model.compile({ optimizer: tf.train.sgd(0.2), loss: 'meanSquaredError' });
+        brain.compiled = true;
+    }
+    
+    // 1-epoch background training step
+    await brain.model.fit(inputTensor, targetTensor, { epochs: 1, verbose: 0 });
+    
+    inputTensor.dispose();
+    targetTensor.dispose();
+}
+
+requestAnimationFrame(gameLoop);
+
 window.onload = boot;

@@ -36,6 +36,18 @@
                 <div class="bar-bg"><div id="insp-energy" class="bar-fill" style="background: #eab308; width: 100%;"></div></div>
             </div>
         </div>
+        <!-- Phase 12: Control Bar -->
+        <div id="control-bar" class="glass-panel">
+            <button id="btn-play-pause">⏸️ Pause</button>
+            <div class="divider"></div>
+            <button id="btn-speed-1x" class="active">1x</button>
+            <button id="btn-speed-2x">2x</button>
+            <button id="btn-speed-5x">5x</button>
+            <div class="divider"></div>
+            <button id="btn-save-brain">💾 Save Best</button>
+            <input type="file" id="btn-load-brain" style="display: none;" accept=".json">
+            <button onclick="document.getElementById('btn-load-brain').click()">📂 Load Brain</button>
+        </div>
     </div>
 
     <!-- Engine Scripts -->
